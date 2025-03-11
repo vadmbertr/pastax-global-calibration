@@ -1,4 +1,9 @@
+clouddrift
+dask
+equinox
 jax
+jupyter
 numpy
 pastax
+torch
 xarray
