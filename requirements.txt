@@ -4,6 +4,7 @@ equinox
 jax
 jupyter
 numpy
+optax
 pandas
 pastax
 torch
