@@ -1,0 +1,14 @@
+copernicusmarine
+clouddrift
+dask
+equinox
+h5py
+hydra-zen
+jax
+lightning
+numpy
+optax
+pastax==0.0.6
+torchpip
+tqdm
+xarray
