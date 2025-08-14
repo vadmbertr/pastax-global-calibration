@@ -3,6 +3,7 @@ from __future__ import annotations
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import jax.random as jrandom
 from jaxtyping import Array, Float, Int, Real
 from kymatio.jax import Scattering2D
 import lineax as lx
@@ -156,21 +157,27 @@ class StMlp(eqx.Module):
         H2: Int[Array, ""] = 12,
         use_iso_indexes_only: bool = False
     ):
+        key = jrandom.key(0)
+        key1, key2, key3 = jrandom.split(key, 3)
+
         scattering_2d = Scattering2D(J=J, shape=(M, M), L=L)
         
         if use_iso_indexes_only:
             in_features = J * (J - 1)
         else:
             in_features = 1 + J * L + J * (J - 1) * L ** 2 / 2
+        in_features = int(in_features)
         out_features = 5
 
         mlp_encoder = eqx.nn.Sequential(
-            eqx.nn.LayerNorm(in_features),
-            eqx.nn.Linear(in_features, H1),
-            eqx.nn.Lambda(jax.nn.gelu),
-            eqx.nn.Linear(H1, H2),
-            eqx.nn.Lambda(jax.nn.gelu),
-            eqx.nn.Linear(H2, out_features)
+            [
+                eqx.nn.LayerNorm(in_features),
+                eqx.nn.Linear(in_features, H1, key=key1),
+                eqx.nn.Lambda(jax.nn.gelu),
+                eqx.nn.Linear(H1, H2, key=key2),
+                eqx.nn.Lambda(jax.nn.gelu),
+                eqx.nn.Linear(H2, out_features, key=key3)
+            ]
         )
         
         return cls(

@@ -91,8 +91,9 @@ class HDF5Data:
                 duacs_ds[i] = tuple([duacs_sample[0][k] for k in otf_ds.duacs.variables] + list(duacs_sample[1:]))
                 mur_ds[i] = tuple([mur_sample[0][k] for k in otf_ds.mur.variables] + list(mur_sample[1:]))
 
-    def prepare_data(self, duacs: Duacs, mur: Mur):
+    def prepare_data(self, gdp: GDP1h, duacs: Duacs, mur: Mur):
         if not os.path.exists(f"{self.data_root}/{self.filename}"):
+            gdp.prepare_data()
             duacs.prepare_data()
             mur.prepare_data()
             

@@ -1,5 +1,6 @@
 import numpy as np
 from torch.utils.data import Dataset as TorchDataset
+import xarray as xr
 
 from .forcings import Duacs, Mur
 from .gdp import GDP1h
@@ -13,23 +14,32 @@ class _PhysicalField:
         self.variables = variables
         self.periodic_grid = periodic_grid
 
-        self.ds = data()
+        ds = self._open_ds(data)
 
         self.data = data
         self.ds = None
         
-        self.nt = self.ds.time.size
-        self.mint = self.ds.time.min()
-        self.dt = self.ds.time[1] - self.ds.time[0]
+        self.nt = ds.time.size
+        self.mint = ds.time.min()
+        self.dt = ds.time[1] - ds.time[0]
         self.t_di = np.ceil(np.timedelta64(n_days, "D") / self.dt)
-        self.nlat = self.ds.latitude.size
-        self.minlat = self.ds.latitude.min()
-        self.dlat = self.ds.latitude[1] - self.ds.latitude[0]  # regular grid
+        self.nlat = ds.latitude.size
+        self.minlat = ds.latitude.min()
+        self.dlat = ds.latitude[1] - ds.latitude[0]  # regular grid
         self.lat_di = np.ceil(max_travel_distance / self.dlat)
-        self.nlon = self.ds.longitude.size
-        self.minlon = self.ds.longitude.min()
-        self.dlon = self.ds.longitude[1] - self.ds.longitude[0]  # regular grid
+        self.nlon = ds.longitude.size
+        self.minlon = ds.longitude.min()
+        self.dlon = ds.longitude[1] - ds.longitude[0]  # regular grid
         self.lon_di = np.ceil(max_travel_distance / self.dlon)
+
+    @classmethod
+    def _open_ds(cls, data: ZarrData) -> xr.Dataset:
+        ds = data()
+        if "lat" in ds:
+            ds = ds.rename({"lat": "latitude"})
+        if "lon" in ds:
+            ds = ds.rename({"lon": "longitude"})
+        return ds
 
     def __call__(
         self, traj_lat: np.ndarray, traj_lon: np.ndarray, traj_time: np.ndarray
@@ -45,6 +55,9 @@ class _PhysicalField:
             padright = max(0, max_i - (n - 1))
             max_i = min(n - 1, max_i)
             return (padleft, padright), (min_i, max_i)
+
+        if self.ds is None:
+            self.ds = self._open_ds(self.data)
 
         t0 = traj_time[0].astype("datetime64[s]")
         lat0 = traj_lat[0]
@@ -126,14 +139,14 @@ class XarrayDataset(TorchDataset):
         mur: Mur,
         periodic_grids: bool = True
     ):
-        self.traj_ds = gdp()
+        traj_ds = gdp()
 
         self.size = traj_ds.traj.size
         self.gdp = gdp
         self.traj_ds = None
 
         max_travel_distance = .5  # in ° / day ; inferred from data
-        traj_t0_t1 = self.traj_ds.time.isel(traj=0)[np.asarray([0, -1])]
+        traj_t0_t1 = traj_ds.time.isel(traj=0)[np.asarray([0, -1])]
         n_days = ((traj_t0_t1[-1] - traj_t0_t1[0]) / np.timedelta64(1, "D")).astype(int).as_numpy().item()
         max_travel_distance = max_travel_distance * n_days
 
@@ -141,7 +154,7 @@ class XarrayDataset(TorchDataset):
         self.mur = _PhysicalField(mur, {"T": "analysed_sst"}, periodic_grids, max_travel_distance, n_days)
 
     def __len__(self) -> int:
-        return self.traj_ds.traj.size
+        return self.size
 
     def __getitem__(self, idx: int) -> tuple[
         tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],

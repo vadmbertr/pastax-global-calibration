@@ -28,14 +28,7 @@ class Mur(ZarrData):
     id: str = "MUR-JPL-L4-GLOB-v4.1"
 
     def _download(self):
-        cm.subset(
-            dataset_id=self.id,
-            variables=["ugos", "vgos"],
-            start_datetime=self.start_datetime,
-            end_datetime=self.end_datetime,
-            output_filename=self.filename,
-            output_directory=self.data_root,
-        )
+        self._download_and_make_zarr()
 
     @classmethod
     def _mur_date_to_filename(cls, date: datetime) -> str:
@@ -45,6 +38,8 @@ class Mur(ZarrData):
 
     @classmethod
     def _download_file(cls, date: datetime, output_dir: str) -> str:
+        os.makedirs(output_dir, exist_ok=True)
+
         base_url = "https://archive.podaac.earthdata.nasa.gov/podaac-ops-cumulus-protected/MUR-JPL-L4-GLOB-v4.1/"
 
         filename = cls._mur_date_to_filename(date)
@@ -58,31 +53,24 @@ class Mur(ZarrData):
                     f.write(chunk)
         return out_path
 
-    @classmethod
-    def _download_and_make_zarr(
-        cls, start_datetime: str, end_datetime: str, output_directory: str
-    ):
-        os.makedirs(output_directory, exist_ok=True)
-
-        start = datetime.fromisoformat(start_datetime)
-        end = datetime.fromisoformat(end_datetime)
+    def _download_and_make_zarr(self):
+        start = datetime.fromisoformat(self.start_datetime)
+        end = datetime.fromisoformat(self.end_datetime)
         dates = [start + timedelta(days=i) for i in range((end - start).days)]
 
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=32) as executor:
             nc_files = list(
                 tqdm(
-                    executor.map(lambda d: download_file(d, output_directory), dates),
+                    executor.map(lambda d: self._download_file(d, os.path.join(self.data_root, "tmp")), dates),
                     total=len(dates), desc="Downloading MUR snapshots"
                 )
             )
 
         ds = xr.open_mfdataset(nc_files, combine="by_coords")
         ds = ds[["analysed_sst"]]
-        zarr_path = os.path.join(output_directory, self.filename)
+        zarr_path = os.path.join(self.data_root, self.filename)
         ds.to_zarr(zarr_path, mode="w")
         ds.close()
 
         for f in nc_files:
             os.remove(f)
-
-        print(f"Zarr dataset saved at: {zarr_path}")
