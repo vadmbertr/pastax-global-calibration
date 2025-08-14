@@ -5,10 +5,13 @@ equinox
 h5py
 hydra-zen
 jax
+kymatio
 lightning
 numpy
 optax
 pastax==0.0.6
+requests
 torchpip
+torchvision
 tqdm
 xarray

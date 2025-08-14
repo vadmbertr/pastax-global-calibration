@@ -1,0 +1,18 @@
+# general
+**/__pycache__
+.pytest_cache
+.ipynb_checkpoints
+*.DS_Store
+
+# Runs
+experiments/**/outputs
+experiments/**/multirun
+
+# Tests
+experiments/**/*.ipynb
+
+# IDE related
+.idea
+
+# git stuff
+!**/.gitkeep
