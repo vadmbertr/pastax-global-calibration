@@ -37,6 +37,8 @@ class StochasticModule(L.LightningModule):
             "optimizer", "learning_rate_scheduler", "learning_rate"
         )
 
+        self.simulator = StochasticSimulator()
+
         self.dynamics = dynamics
         self.ensemble_size = ensemble_size
 
@@ -49,8 +51,6 @@ class StochasticModule(L.LightningModule):
         self.learning_rate = learning_rate
 
         self.loss_fn = loss_fn
-
-        self.simulator = StochasticSimulator()
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]):
         buffer = io.BytesIO(checkpoint["dynamics"])
@@ -96,7 +96,16 @@ class StochasticModule(L.LightningModule):
         indices = self._get_loss_indices(traj_len)
 
         self.dynamics, self.opt_state, loss, grads, metrics = self.make_step(
-            grids_batch, reference_trajectory_batch, indices
+            self.simulator,
+            self.dynamics,
+            self.ensemble_size,
+            self.integration_dt,
+            self.n_steps,
+            self.loss_fn,
+            self.optim,
+            grids_batch,
+            reference_trajectory_batch,
+            indices
         )
 
         loss = self._jax_to_torch(loss)
@@ -174,8 +183,15 @@ class StochasticModule(L.LightningModule):
         indices = self._get_loss_indices(traj_len)
 
         _, (loss, metrics) = self._batch_step(
-            self.dynamics, self.simulator, self.integration_dt, self.n_steps,
-            grids_batch, reference_trajectory_batch, indices
+            self.simulator,
+            self.dynamics,
+            self.ensemble_size,
+            self.integration_dt,
+            self.n_steps,
+            self.loss_fn,
+            grids_batch,
+            reference_trajectory_batch,
+            indices
         )
 
         loss = self._jax_to_torch(loss)
@@ -190,35 +206,62 @@ class StochasticModule(L.LightningModule):
             self.simulator, self.integration_dt, self.n_steps, self.dynamics, grids, x0, ts
         )
 
+    @classmethod
     @eqx.filter_jit
     def make_step(
-        self, 
+        cls, 
+        simulator: StochasticSimulator,
+        dynamics: eqx.Module,
+        ensemble_size: int,
+        integration_dt: float,
+        n_steps: int,
+        loss_fn: str,
+        optim: optax.GradientTransformation,
         grids_batch: tuple[Gridded, Gridded, Gridded], 
         reference_trajectory_batch: Trajectory,
         indices: Int[Array, ""]
     ) -> tuple[eqx.Module, optax.OptState, Float[Array, ""], eqx.Module, dict[str, Float[Array, ""]]]:
-        grad, (loss_val, metrics) = eqx.filter_jacfwd(self._batch_step, has_aux=True)(
-            grids_batch, 
-            reference_trajectory_batch, 
+        grad, (loss_val, metrics) = eqx.filter_jacfwd(cls._batch_step, has_aux=True)(
+            simulator,
+            dynamics,
+            ensemble_size,
+            integration_dt,
+            n_steps,
+            loss_fn,
+            grids_batch,
+            reference_trajectory_batch,
             indices
         )
 
         grad = eqx.filter(grad, eqx.is_array)
-        updates, opt_state = self.optim.update(grad, self.opt_state, self.dynamics)
-        dynamics = eqx.apply_updates(self.dynamics, updates)
+        updates, opt_state = optim.update(grad, opt_state, dynamics)
+        dynamics = eqx.apply_updates(dynamics, updates)
         
         return dynamics, opt_state, loss_val, grad, metrics
 
+    @classmethod
     def _batch_step(
-        self, 
+        cls,
+        simulator: StochasticSimulator,
+        dynamics: eqx.Module,
+        ensemble_size: int,
+        integration_dt: float,
+        n_steps: int,
+        loss_fn: str,
         grids_batch: tuple[Gridded, Gridded, Gridded], 
         reference_trajectory_batch: Trajectory,
         indices: Int[Array, ""]
     ) -> tuple[Float[Array, ""], tuple[Float[Array, ""], dict[str, Float[Array, ""]]]]:
         loss, metrics = eqx.filter_vmap(
-            lambda grid, reference_trajectory: self._sample_step(
+            lambda grid, reference_trajectory: cls._sample_step(
+                simulator,
+                dynamics,
+                ensemble_size,
+                integration_dt,
+                n_steps,
+                loss_fn,
                 grid,
-                reference_trajectory, 
+                reference_trajectory,
                 indices
             )
         )(grids_batch, reference_trajectory_batch)
@@ -228,20 +271,36 @@ class StochasticModule(L.LightningModule):
 
         return loss, (loss, metrics)
 
+    @classmethod
     def _sample_step(
-        self, 
+        cls,
+        simulator: StochasticSimulator,
+        dynamics: eqx.Module,
+        ensemble_size: int,
+        integration_dt: float,
+        n_steps: int,
+        loss_fn: str,
         grids: tuple[Gridded, Gridded, Gridded],  
         reference_trajectory: Trajectory,
         indices: Int[Array, ""]
     ) -> tuple[Float[Array, ""], dict[str, Float[Array, ""]]]:
         x0 = reference_trajectory.origin
         ts = reference_trajectory.times.value
-        simulated_trajectories = self._forward(grids, x0, ts)
+        simulated_trajectories = cls._forward(
+            simulator,
+            dynamics,
+            ensemble_size,
+            integration_dt,
+            n_steps,
+            grids,
+            x0,
+            ts
+        )
 
-        liu_index = self._liu_index(reference_trajectory, simulated_trajectories, indices)
-        separation_distance = self._separation_distance(reference_trajectory, simulated_trajectories, indices)
+        liu_index = cls._liu_index(reference_trajectory, simulated_trajectories, indices)
+        separation_distance = cls._separation_distance(reference_trajectory, simulated_trajectories, indices)
 
-        if self.loss_fn == "liu_index":
+        if loss_fn == "liu_index":
             loss = liu_index
         else:
             loss = separation_distance
@@ -253,20 +312,40 @@ class StochasticModule(L.LightningModule):
 
         return loss, metrics
     
+    @classmethod
     def _forward(
-        self, 
-        grids: tuple[Gridded, Gridded], 
-        x0: Location, 
+        cls,
+        simulator: StochasticSimulator,
+        dynamics: eqx.Module,
+        ensemble_size: int,
+        integration_dt: float,
+        n_steps: int,
+        grids: tuple[Gridded, Gridded],
+        x0: Location,
         ts: Real[Array, "time"]
     ) -> TrajectoryEnsemble:
-        dt0, saveat, stepsize_controller, adjoint, n_steps, brownian_motion = self.simulator.get_diffeqsolve_best_args(
-            ts, self.integration_dt, n_steps=n_steps, constant_step_size=True, save_at_steps=False, ad_mode="reverse"
+        dt0, saveat, stepsize_controller, adjoint, n_steps, brownian_motion = simulator.get_diffeqsolve_best_args(
+            ts,
+            integration_dt,
+            n_steps,
+            constant_step_size=True,
+            save_at_steps=False,
+            ad_mode="reverse"
         )
 
-        simulated_trajectories = self.simulator(
-            dynamics=self.dynamics, args=grids, x0=x0, ts=ts, solver=dfx.EulerHeun(),
-            dt0=dt0, saveat=saveat, stepsize_controller=stepsize_controller, adjoint=adjoint, max_steps=n_steps,
-            n_samples=self.ensemble_size, brownian_motion=brownian_motion
+        simulated_trajectories = simulator(
+            dynamics=dynamics,
+            args=grids,
+            x0=x0,
+            ts=ts,
+            solver=dfx.Heun(),
+            dt0=dt0,
+            saveat=saveat,
+            stepsize_controller=stepsize_controller,
+            adjoint=adjoint,
+            max_steps=n_steps,
+            n_samples=ensemble_size,
+            brownian_motion=brownian_motion
         )
 
         return simulated_trajectories
