@@ -14,16 +14,19 @@ from pastax.utils import longitude_in_180_180_degrees, meters_to_degrees
 
 class StMlp(eqx.Module):
 
-    scattering_2d: Scattering2D
+    scattering_2d: Scattering2D = eqx.field(static=True)
     mlp_encoder: eqx.nn.Sequential
-    J: int
-    L: int
-    M: int
-    use_iso_indexes_only: bool
+    J: int = eqx.field(static=True)
+    L: int = eqx.field(static=True)
+    M: int = eqx.field(static=True)
+    use_iso_indexes_only: bool = eqx.field(static=True)
 
     def __call__(
         self, t: Real[Array, ""], y: Float[Array, "2"], args: tuple[Gridded, Gridded]
     ) -> Float[Array, "2"]:
+        def sanitize(arr: Float[Array, "..."], replacement: Float[Array, ""] = 0.0) -> Float[Array, "..."]:
+            return jnp.nan_to_num(arr, nan=replacement, posinf=replacement, neginf=replacement)
+        
         latitude, longitude = y
         longitude = longitude_in_180_180_degrees(longitude)  # ensure longitude is in [-180, 180] degrees
 
@@ -31,6 +34,10 @@ class StMlp(eqx.Module):
         
         vu_geos = self._geostrophic_part(latitude, longitude, t, duacs_ds)
         mu, sigma = self._learned_part(latitude, longitude, t, mur_ds)
+
+        vu_geos = sanitize(vu_geos)
+        mu = sanitize(mu)
+        sigma = sanitize(sigma, replacement=1.0)
 
         vu_deter = vu_geos + mu
         vu_stoch = sigma
@@ -141,7 +148,7 @@ class StMlp(eqx.Module):
         mu_y, mu_x, sigma_y, sigma_x, sigma_yx = self.mlp_encoder(st_coeffs)
 
         mu = jnp.asarray((mu_x, mu_y))
-        sigma = jnp.diag(jnp.asarray((sigma_y, sigma_x)))
+        sigma = jnp.diag(jnp.exp(jnp.asarray((sigma_y, sigma_x))))
         sigma = sigma.at[0, 1].set(sigma_yx)
         sigma = sigma.at[1, 0].set(sigma_yx)
 

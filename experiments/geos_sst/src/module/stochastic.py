@@ -76,7 +76,7 @@ class StochasticModule(L.LightningModule):
         if self.learning_rate_scheduler == "cosine":
             lr_scheduler = lambda lr: optax.cosine_onecycle_schedule(
                 transition_steps=1000,
-                peak_value=lr*2.5,
+                peak_value=lr * 2.5,
                 pct_start=0.1,
                 div_factor=2.5,
                 final_div_factor=10.0
@@ -103,6 +103,7 @@ class StochasticModule(L.LightningModule):
             self.n_steps,
             self.loss_fn,
             self.optim,
+            self.opt_state,
             grids_batch,
             reference_trajectory_batch,
             indices
@@ -183,8 +184,8 @@ class StochasticModule(L.LightningModule):
         indices = self._get_loss_indices(traj_len)
 
         _, (loss, metrics) = self._batch_step(
-            self.simulator,
             self.dynamics,
+            self.simulator,
             self.ensemble_size,
             self.integration_dt,
             self.n_steps,
@@ -217,13 +218,14 @@ class StochasticModule(L.LightningModule):
         n_steps: int,
         loss_fn: str,
         optim: optax.GradientTransformation,
+        opt_state: optax.OptState,
         grids_batch: tuple[Gridded, Gridded, Gridded], 
         reference_trajectory_batch: Trajectory,
         indices: Int[Array, ""]
     ) -> tuple[eqx.Module, optax.OptState, Float[Array, ""], eqx.Module, dict[str, Float[Array, ""]]]:
-        grad, (loss_val, metrics) = eqx.filter_jacfwd(cls._batch_step, has_aux=True)(
-            simulator,
+        grad, (loss_val, metrics) = eqx.filter_jacrev(cls._batch_step, has_aux=True)(
             dynamics,
+            simulator,
             ensemble_size,
             integration_dt,
             n_steps,
@@ -242,8 +244,8 @@ class StochasticModule(L.LightningModule):
     @classmethod
     def _batch_step(
         cls,
-        simulator: StochasticSimulator,
         dynamics: eqx.Module,
+        simulator: StochasticSimulator,
         ensemble_size: int,
         integration_dt: float,
         n_steps: int,
