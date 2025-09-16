@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Real
 
 from pastax.gridded import Gridded
 from pastax.utils import longitude_in_180_180_degrees, meters_to_degrees
+
+
+def sanitize(arr):
+    return jnp.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 class LinearDeterministic(eqx.Module):
@@ -25,7 +30,7 @@ class LinearDeterministic(eqx.Module):
     $\mathbf{u}_h = \mathbf{u}_{h_0} \frac{1 - \exp{2k z_d}}{2k z_d}$, where k is the wave number 
     and $z_d$ is the depth of the drogue (-15m).
 
-    Parameters $w_e$, $\theta_e$, $w_s$, and $w_l$ are tunable coefficients, initialized to 1.5%, 20°, 1, and 0.5%, 
+    Parameters $w_e$, $\theta_e$, $w_s$, and $w_l$ are tunable coefficients, initialized to 1.5%, 45°, 1, and 0.5%, 
     respectively.
 
     Attributes
@@ -41,6 +46,9 @@ class LinearDeterministic(eqx.Module):
     """
 
     mu: Float[Array, "4"] = eqx.field(converter=lambda x: jnp.asarray(x))
+    depth_integrated_stokes: bool = eqx.field(static=True)
+    effective_wavenumber: bool = eqx.field(static=True)
+    include_leeway: bool = eqx.field(static=True)
 
     def get_coefficients(self) -> Float[Array, "4"]:
         """
@@ -51,7 +59,10 @@ class LinearDeterministic(eqx.Module):
         Float[Array, "4"]
             The model coefficients in the physical space.
         """
-        return jnp.exp(self.mu)
+        mu_phy = jnp.exp(self.mu)
+        mu_phy = sanitize(mu_phy)
+
+        return mu_phy
 
     def get_gradients(self) -> Float[Array, "4"]:
         """
@@ -89,40 +100,63 @@ class LinearDeterministic(eqx.Module):
             uv_dict = field.interp(*variables, time=t, latitude=lat, longitude=lon)
             return jnp.asarray([uv_dict[k] for k in variables])
         
-        def sanitize(arr):
-            return jnp.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-        
         def geostrophy():
             return sanitize(ug_vu)
         
         def ekman():
+            # clockwise in the NH, counter-clockwise in the SH
+            ekman_rotation_signed = ekman_rotation * jnp.sign(latitude)
             rotation_matrix = jnp.asarray([
-                [jnp.cos(ekman_rotation), -jnp.sin(ekman_rotation)],
-                [jnp.sin(ekman_rotation),  jnp.cos(ekman_rotation)]
+                [jnp.cos(ekman_rotation_signed), -jnp.sin(ekman_rotation_signed)],
+                [jnp.sin(ekman_rotation_signed),  jnp.cos(ekman_rotation_signed)]
             ])
-            ekman_velocity = rotation_matrix @ ug_vu
+
+            ekman_velocity = rotation_matrix @ uw_vu
             return ekman_scale * sanitize(ekman_velocity)
 
         def stokes():
-            vu0 = uh_vut[:-1]  # wave Stokes drift at the surface
-            tp = uh_vut[-1]  # wave peak period
-            g = 9.80665
-            k = (2 * jnp.pi)* 2 / (tp**2 * g)  # wave number
-            drogue_depth = 15
-            stokes_drift = vu0 * (1 - jnp.exp(-2 * k * drogue_depth)) / (2 * k * drogue_depth)
+            vu0 = uh_vuth[:2]  # Stokes drift at the surface
+
+            if self.depth_integrated_stokes:
+                tp, hs = uh_vuth[2:]  # wave peak period and wave significant height
+                drogue_depth = 15.
+
+                if not self.effective_wavenumber:
+                    g = 9.80665
+                    wp = 2 * jnp.pi / tp
+                    k = wp ** 2 / g  # peak wavenumber
+                else:
+                    wp = 2 * jnp.pi / tp
+                    u0 = jnp.sqrt(jnp.sum(vu0 ** 2))
+                    k = 8 * u0 / (wp * hs ** 2)  # effective monochromatic wavenumber
+
+                # avoid numerical issues
+                x = 2 * k * drogue_depth
+                factor = jax.lax.cond(
+                    x < 1e-6, lambda _: drogue_depth, lambda _: (1 - jnp.exp(-x)) / (2 * k), operand=None
+                )
+                stokes_drift = vu0 * factor / drogue_depth
+            else:
+                stokes_drift = vu0
+
             return stokes_scale * sanitize(stokes_drift)
 
         def leeway():
-            return leeway_scale * sanitize(uw_vu)
+            if self.include_leeway:
+                factor = leeway_scale
+            else:
+                factor = 0
+            
+            return factor * sanitize(uw_vu)
 
         latitude, longitude = y
-        longitude = longitude_in_180_180_degrees(longitude)
+        longitude = longitude_in_180_180_degrees(longitude)  # ensure longitude is in [-180, 180] degrees
 
         uc_field, uw_field, uh_field = args
         
         ug_vu = interp(uc_field, ("v", "u"), t, latitude, longitude)
         uw_vu = interp(uw_field, ("v", "u"), t, latitude, longitude)
-        uh_vut = interp(uh_field, ("v", "u", "t"), t, latitude, longitude)
+        uh_vuth = interp(uh_field, ("v", "u", "t", "h"), t, latitude, longitude)
 
         ekman_scale, ekman_rotation, stokes_scale, leeway_scale = self.get_coefficients()
 
@@ -134,7 +168,13 @@ class LinearDeterministic(eqx.Module):
         return vu
 
     @classmethod
-    def from_physical_space(cls, mu: Float[Array, "4"] | None = None):
+    def from_physical_space(
+        cls, 
+        mu: Float[Array, "4"] | None = None,
+        depth_integrated_stokes: bool = True,
+        effective_wavenumber: bool = True,
+        include_leeway: bool = True
+    ):
         """
         Returns a model initialized with the mean coefficients in the log-space, given their physical space 
         counterparts.
@@ -142,7 +182,7 @@ class LinearDeterministic(eqx.Module):
         Parameters
         ----------
         mu : Float[Array, "4"], optional
-            The mean vector of the model coefficients in the physical space, by default `[1.5%, 20°, 1, 0.5%]`.
+            The mean vector of the model coefficients in the physical space, by default `[1.5%, 45°, 1, 0.5%]`.
 
         Returns
         -------
@@ -150,6 +190,11 @@ class LinearDeterministic(eqx.Module):
             A LinearStochastic model initialized with the given parameters.
         """
         if mu is None:
-            mu = jnp.asarray([1.5 / 100, jnp.deg2rad(20.), 1., .5 / 100])
+            mu = jnp.asarray([1.5 / 100, jnp.deg2rad(45.), 1., .5 / 100])
         
-        return cls(mu=jnp.log(mu))
+        return cls(
+            mu=jnp.log(mu),
+            depth_integrated_stokes=depth_integrated_stokes,
+            effective_wavenumber=effective_wavenumber,
+            include_leeway=include_leeway
+        )

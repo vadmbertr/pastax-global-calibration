@@ -1,7 +1,14 @@
+import os
+os.environ["EQX_ON_ERROR"] = "nan"
+
+import jax
+jax.config.update("jax_enable_x64", True)
+
 import dask
-from hydra_zen import builds, make_config, make_custom_builds_fn, zen, ZenStore
+from hydra_zen import make_config, make_custom_builds_fn, zen, ZenStore
 from hydra_zen.typing import Partial
 import lightning as L
+from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 import torch
 
 from src.data.datamodule import DataModule
@@ -12,50 +19,51 @@ from src.module.stochastic import StochasticModule
 pbuilds = make_custom_builds_fn(zen_partial=True, populate_full_signature=True)
 
 ExperimentConfig = make_config(
-    datamodule=builds(
-        DataModule,
-        train_test_val_splits=[0.64, 0.2, 0.16], batch_size=128, num_workers=32, prefetch_factor=3
+    dynamics=pbuilds(
+        LinearStochastic.from_physical_space,
+        depth_integrated_stokes=True, effective_wavenumber=True, include_leeway=True
     ),
     module=pbuilds(
         StochasticModule, 
         integration_dt=30*60, 
         optimizer="rmsprop", 
         learning_rate_scheduler="cosine", 
-        learning_rate=1e-3, 
-        antithetic_variate=True,
+        learning_rate=2e-3,
+        antithetic_variate=False,
         loss_fn="separation_distance"
     ),
-    checkpointer=builds(L.pytorch.callbacks.ModelCheckpoint, monitor="val_loss", mode="min", save_top_k=1),
+    datamodule=pbuilds(
+        DataModule,
+        train_test_val_splits=[0.64, 0.2, 0.16], batch_size=128, num_workers=32, prefetch_factor=3
+    ),
     trainer=pbuilds(
         L.Trainer, 
         accelerator="auto", 
         logger=True,
-        max_epochs=10, 
+        max_epochs=15, 
         enable_progress_bar=True, 
-        log_every_n_steps=1
+        log_every_n_steps=10
     ),
 )
 
 
 def do_calibrate(
-    datamodule: DataModule, 
+    dynamics: Partial[LinearStochastic],
     module: Partial[StochasticModule],
-    checkpointer: L.pytorch.callbacks.ModelCheckpoint,
+    datamodule: Partial[DataModule], 
     trainer: Partial[L.Trainer],
-    jax_enable_x64: bool = True,
-    dask_num_workers: int = 4
+    default_root_dir: str = None,
+    dask_num_workers: int = 4,
 ):
-    if jax_enable_x64:
-        import jax
-        jax.config.update("jax_enable_x64", True)
-
     torch.manual_seed(0)
     dask.config.set(scheduler="threads", num_workers=dask_num_workers)
 
-    dynamics = LinearStochastic.from_physical_space()
-    module = module(dynamics=dynamics)
-    trainer = trainer(callbacks=[checkpointer])
-    trainer.fit(module, datamodule=datamodule)
+    csv_logger = CSVLogger("lightning_logs", name="csv_logs")
+    tb_logger = TensorBoardLogger("lightning_logs", name="tb_logs")
+
+    module = module(dynamics=dynamics(), default_root_dir=default_root_dir)
+    trainer = trainer(default_root_dir=default_root_dir, logger=[csv_logger, tb_logger])
+    trainer.fit(module, datamodule=datamodule())
 
 
 if __name__ == "__main__":

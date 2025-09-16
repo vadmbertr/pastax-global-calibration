@@ -143,7 +143,7 @@ class XarrayDataset(TorchDataset):
             uw, {"u": "eastward_wind", "v": "northward_wind"}, periodic_grids, max_travel_distance, n_days
         )
         self.uh = _PhysicalField(
-            uh, {"u": "VSDX", "v": "VSDY", "T": "VTPK"}, periodic_grids, max_travel_distance, n_days
+            uh, {"u": "VSDX", "v": "VSDY", "T": "VTPK", "H": "VHM0"}, periodic_grids, max_travel_distance, n_days
         )
 
     def __len__(self) -> int:

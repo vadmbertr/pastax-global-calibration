@@ -80,7 +80,7 @@ class DataModule(L.LightningDataModule):
             dataset, 
             batch_size=self.batch_size,
             shuffle=shuffle,
-            pin_memory=True,
+            pin_memory=False,
             num_workers=self.num_workers,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
             persistent_workers=self.num_workers > 0,

@@ -37,7 +37,7 @@ class Wave(ZarrData):
     def _download(self):
         cm.subset(
             dataset_id=self.id,
-            variables=["VSDX", "VSDY", "VTPK"],
+            variables=["VSDX", "VSDY", "VTPK", "VHM0"],
             start_datetime=self.start_datetime,
             end_datetime=self.end_datetime,
             output_filename=self.filename,

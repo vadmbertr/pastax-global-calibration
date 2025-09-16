@@ -11,6 +11,7 @@ numpy
 optax
 pastax==0.0.6
 requests
+tensorboardX
 torch
 torchvision
 tqdm

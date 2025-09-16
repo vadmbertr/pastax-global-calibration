@@ -57,7 +57,7 @@ class HDF5Data:
         otf_dl = DataLoader(
             otf_ds,
             batch_size=None,
-            num_workers=10,
+            num_workers=32,
             pin_memory=False,
             prefetch_factor=1,
             multiprocessing_context="forkserver",
