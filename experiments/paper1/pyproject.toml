@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drift_stoch_calib_paper1"
+version = "0.1.0"
+
+dependencies = [
+    "bokeh",
+    "cartopy",
+    "cmocean",
+    "datashader",
+    "equinox",
+    "geoviews",
+    "holoviews",
+    "hydra-zen",
+    "jax",
+    "jaxopt",
+    "jupyterlab",
+    "lightning",
+    "numpy",
+    "matplotlib",
+    "optax",
+    "pandas",
+    "tensorboard",
+    "torch",
+    "tqdm",
+    "xarray"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]

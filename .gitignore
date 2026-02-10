@@ -4,15 +4,21 @@
 .ipynb_checkpoints
 *.DS_Store
 
+# Data
+experiments/**/data
+
 # Runs
 experiments/**/outputs
 experiments/**/multirun
 
-# Tests
-experiments/**/*.ipynb
+# Misc
+experiments/explo
+ige-jaxathon-2025
+sbi-hackathon-2026
 
 # IDE related
 .idea
+.vscode
 
 # git stuff
 !**/.gitkeep
