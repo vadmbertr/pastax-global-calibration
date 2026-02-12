@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ekman-mdn-calibration"
+version = "0.1.0"
+
+dependencies = [
+    "bokeh",
+    "bottleneck",
+    "cartopy",
+    "cmocean",
+    "dask",
+    "datashader",
+    "equinox",
+    "geoviews",
+    "holoviews",
+    "hydra-zen",
+    "jax",
+    "jaxopt",
+    "jupyterlab",
+    "lightning",
+    "netCDF4",
+    "numpy",
+    "matplotlib",
+    "optax",
+    "pandas",
+    "tensorboard",
+    "torch",
+    "tqdm",
+    "xarray",
+    "zarr"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]

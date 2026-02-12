@@ -6,7 +6,9 @@
 *.DS_Store
 
 # Data
-**/data
+**/data/**
+**/data/*
+!**/data/*.ipynb
 
 # Runs
 **/outputs

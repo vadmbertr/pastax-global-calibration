@@ -1,7 +1,0 @@
-data
-euler_criterion
-least_squares
-multirun
-outputs
-rio_2014
-src
