@@ -5,11 +5,13 @@
 *.DS_Store
 
 # Data
-experiments/**/data
+**/data/**
+**/data/*
+!**/data/*.ipynb
 
 # Runs
-experiments/**/outputs
-experiments/**/multirun
+**/outputs
+**/multirun
 
 # Misc
 experiments/explo
