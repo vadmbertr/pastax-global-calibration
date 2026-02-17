@@ -67,14 +67,14 @@ def create_default_config():
             to_datetime_str=to_datetime_str,
             num_workers=16,
             multiprocessing_context="spawn",
-            prefetch_factor=2,
+            prefetch_factor=3,
             persistent_workers=True,
             val_fraction=0.2,
             test_fraction=0.2,
             seed=0
         ),
-        mlp=pbuilds(MLP, in_size=6, out_size=5, hidden_layers_size=[256, 512, 256, 128]),
-        trainer_module=pbuilds(TrainerModule, optim_str="adamw", learning_rate=0.005),
+        mlp=pbuilds(MLP, in_size=6, out_size=5, hidden_layers_size=[128,256,256,256,128,64]),
+        trainer_module=pbuilds(TrainerModule, optim_str="adamw", learning_rate=0.0001),
         early_stop_callback = pbuilds(EarlyStopping, monitor="val", patience=5, min_delta=0., mode="min"),
         trainer = pbuilds(L.Trainer, accelerator="cpu", max_epochs=50, log_every_n_steps=10, enable_checkpointing=False)
     )
@@ -89,7 +89,7 @@ def main(
     early_stop_callback: Partial[EarlyStopping],
     trainer: Partial[L.Trainer],
     data_path: str = "data/",
-    batch_size: int = 2**14
+    batch_size: int = 16000
 ):
     # the order of variables is important and must match the indexes used when manipulating batches
     var_names = [
@@ -122,8 +122,8 @@ def main(
     data_driven_model = DataDrivenModel(mlp=mlp())
     drift_model = DriftModel(
         data_driven_model=data_driven_model, 
-        stress_normalization=jnp.ones(1), 
-        wind_normalization=jnp.ones(1)
+        stress_normalization=1., 
+        wind_normalization=1.,
     )
 
     trainer_module = trainer_module(drift_model=drift_model, batch_size=batch_size, exp_id=EXP_ID)

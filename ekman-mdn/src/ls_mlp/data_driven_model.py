@@ -24,7 +24,7 @@ class DataDrivenModel(eqx.Module):
     beta_w_scale: float
 
     def __init__(self, mlp: MLP):
-        assert mlp.layers[-2] == 5, (f"MLP output dimension must be 5, got {mlp.layers[-2]}.")
+        assert mlp.layers[-2].out_features == 5, (f"MLP output dimension must be 5, got {mlp.layers[-2]}.")
 
         self.mlp = mlp
 
