@@ -22,7 +22,6 @@ def split_dataset(
 
     train_indices = indices[:train_size]
     val_indices = indices[train_size : train_size + val_size]
-    test_indices = indices[train_size + val_size :]
 
     is_train = np.isin(ds.id, drifters_id[train_indices])
     ds_train = ds.where(

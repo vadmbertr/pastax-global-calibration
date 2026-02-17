@@ -13,6 +13,7 @@ dependencies = [
     "cmocean",
     "dask",
     "datashader",
+    "diffrax",
     "equinox",
     "flox",
     "geoviews",
@@ -27,10 +28,12 @@ dependencies = [
     "matplotlib",
     "optax",
     "pandas",
+    "pastax",
     "tensorboard",
     "torch",
     "tqdm",
     "xarray",
+    "xhistogram",
     "zarr"
 ]
 

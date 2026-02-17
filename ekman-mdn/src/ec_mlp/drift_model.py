@@ -60,8 +60,12 @@ class DriftModel(eqx.Module):
         lat_cos: Float[jax.Array, ""],
         lat_sin: Float[jax.Array, ""],
         lon_cos: Float[jax.Array, ""],
-        lon_sin: Float[jax.Array, ""]
+        lon_sin: Float[jax.Array, ""],
+        delta_t: Float[jax.Array, ""] = None
     ) -> Float[jax.Array, ""]:
+        if delta_t is None:
+            delta_t = self.delta_t
+
         physical_parameters, mdn_parameters = self._get_physical_and_mdn_parameters_from_features(
             month_of_year_cos, month_of_year_sin, lat_cos, lat_sin, lon_cos, lon_sin
         )
@@ -80,16 +84,16 @@ class DriftModel(eqx.Module):
         ):
             sigma_x, sigma_y = sigma_k[0], sigma_k[1]  # in m/s^{1/2}
 
-            logdet = 2 * jnp.log(self.delta_t) + 2 * jnp.log(sigma_x) + 2 * jnp.log(sigma_y) + jnp.log(1 - rho_k ** 2)
+            logdet = 2 * jnp.log(delta_t) + 2 * jnp.log(sigma_x) + 2 * jnp.log(sigma_y) + jnp.log(1 - rho_k ** 2)
 
-            diff_x = (epsilon_u - mu_k[0]) * self.delta_t  # in m
-            diff_y = (epsilon_v - mu_k[1]) * self.delta_t  # in m
+            diff_x = (epsilon_u - mu_k[0]) * delta_t  # in m
+            diff_y = (epsilon_v - mu_k[1]) * delta_t  # in m
 
             quad_term = (
                 (diff_x ** 2 / sigma_x ** 2) +  # in s
                 (diff_y ** 2 / sigma_y ** 2) - 
                 2 * rho_k * diff_x * diff_y / (sigma_x * sigma_y)
-            ) / (self.delta_t * (1 - rho_k ** 2))  # nondimensional
+            ) / (delta_t * (1 - rho_k ** 2))  # nondimensional
 
             return -(1 / 2) * (logdet + quad_term + 2 * jnp.log(2 * jnp.pi))
         
@@ -109,7 +113,38 @@ class DriftModel(eqx.Module):
         month_of_year: Float[jax.Array, ""],
         lat: Float[jax.Array, ""],
         lon: Float[jax.Array, ""],
-        key: Key[jax.Array, ""]
+        key: Key[jax.Array, ""],
+        delta_t: Float[jax.Array, ""] = None
+    ) -> tuple[Float[jax.Array, ""], Float[jax.Array, ""]]:
+        if delta_t is None:
+            delta_t = self.delta_t
+
+        physical_parameters, mdn_parameters = self.get_physical_and_mdn_parameters(
+            month_of_year, lat, lon, to_physical_space=False, in_degrees=False
+        )
+
+        u_est, v_est = self._evaluate_deterministic_term(
+            ugos, vgos, eastward_stress, northward_stress, eastward_wind, northward_wind, *physical_parameters
+        )
+
+        epsilon_u, epsilon_v = self._sample_velocity_residual(*mdn_parameters, key, delta_t)
+
+        u_sample = u_est + epsilon_u
+        v_sample = v_est + epsilon_v
+
+        return u_sample, v_sample
+    
+    def estimate_mode_velocity(
+        self,
+        ugos: Float[jax.Array, ""],
+        vgos: Float[jax.Array, ""],
+        eastward_stress: Float[jax.Array, ""],
+        northward_stress: Float[jax.Array, ""],
+        eastward_wind: Float[jax.Array, ""],
+        northward_wind: Float[jax.Array, ""],
+        month_of_year: Float[jax.Array, ""],
+        lat: Float[jax.Array, ""],
+        lon: Float[jax.Array, ""]
     ) -> tuple[Float[jax.Array, ""], Float[jax.Array, ""]]:
         physical_parameters, mdn_parameters = self.get_physical_and_mdn_parameters(
             month_of_year, lat, lon, to_physical_space=False, in_degrees=False
@@ -119,12 +154,12 @@ class DriftModel(eqx.Module):
             ugos, vgos, eastward_stress, northward_stress, eastward_wind, northward_wind, *physical_parameters
         )
 
-        epsilon_u, epsilon_v = self._sample_velocity_residual(*mdn_parameters, key)
+        mode_epsilon_u, mode_epsilon_v = self.get_mode_residual_velocity_from_mdn_parameters(*mdn_parameters)
 
-        u_sample = u_est + epsilon_u
-        v_sample = v_est + epsilon_v
+        u_mode = u_est + mode_epsilon_u
+        v_mode = v_est + mode_epsilon_v
 
-        return u_sample, v_sample
+        return u_mode, v_mode
 
     def estimate_deterministic_velocity(
         self,
@@ -172,12 +207,16 @@ class DriftModel(eqx.Module):
         self,
         month_of_year: Float[jax.Array, ""],
         lat: Float[jax.Array, ""],
-        lon: Float[jax.Array, ""]
+        lon: Float[jax.Array, ""],
+        delta_t: Float[jax.Array, ""] = None
     ) -> tuple[Float[jax.Array, ""], Float[jax.Array, ""]]:
+        if delta_t is None:
+            delta_t = self.delta_t
+
         mean_epsilon_u, mean_epsilon_v = self.get_mean_residual_velocity(month_of_year, lat, lon)
 
-        mean_epsilon_x = mean_epsilon_u * self.delta_t  # in m
-        mean_epsilon_y = mean_epsilon_v * self.delta_t  # in m
+        mean_epsilon_x = mean_epsilon_u * delta_t  # in m
+        mean_epsilon_y = mean_epsilon_v * delta_t  # in m
 
         return mean_epsilon_x, mean_epsilon_y
     
@@ -208,12 +247,16 @@ class DriftModel(eqx.Module):
         self,
         month_of_year: Float[jax.Array, ""],
         lat: Float[jax.Array, ""],
-        lon: Float[jax.Array, ""]
+        lon: Float[jax.Array, ""],
+        delta_t: Float[jax.Array, ""] = None
     ) -> tuple[Float[jax.Array, ""], Float[jax.Array, ""]]:
+        if delta_t is None:
+            delta_t = self.delta_t
+
         mode_epsilon_u, mode_epsilon_v = self.get_mode_residual_velocity(month_of_year, lat, lon)
 
-        mode_epsilon_x = mode_epsilon_u * self.delta_t  # in m
-        mode_epsilon_y = mode_epsilon_v * self.delta_t  # in m
+        mode_epsilon_x = mode_epsilon_u * delta_t  # in m
+        mode_epsilon_y = mode_epsilon_v * delta_t  # in m
 
         return mode_epsilon_x, mode_epsilon_y
     
@@ -234,7 +277,8 @@ class DriftModel(eqx.Module):
         pi_k: Float[jax.Array, "n_components"],
         mu_k: Float[jax.Array, "n_components 2"],
         sigma_k: Float[jax.Array, "n_components 2"],
-        rho_k: Float[jax.Array, "n_components"]
+        rho_k: Float[jax.Array, "n_components"],
+        delta_t: Float[jax.Array, ""] = None
     ) -> Float[jax.Array, "2 2"]:
         """
         The diffusivity tensor K is defined as $K = (1/2) * Cov[\Delta X_t - f(t, X_t) | (t, X_t)]$
@@ -257,6 +301,9 @@ class DriftModel(eqx.Module):
         Cov[E[\Delta X_t - f(t, X_t) | (t, X_t)]] = \Delta t * \sum_{k=1}^{n} \pi_k (\mu_k - \bar{\mu})(\mu_k - \bar{\mu})^T
         $$
         """
+        if delta_t is None:
+            delta_t = self.delta_t
+
         sigma_x = sigma_k[:, 0]
         sigma_y = sigma_k[:, 1]
         cov_xy = rho_k * sigma_x * sigma_y
@@ -268,7 +315,7 @@ class DriftModel(eqx.Module):
 
         mu_bar = jnp.sum(pi_k[:, None] * mu_k, axis=0)
         diffs = mu_k - mu_bar[None, :]
-        cov_exp = self.delta_t * jnp.sum(pi_k[:, None, None] * jnp.einsum("ni,nj->nij", diffs, diffs), axis=0)
+        cov_exp = delta_t * jnp.sum(pi_k[:, None, None] * jnp.einsum("ni,nj->nij", diffs, diffs), axis=0)
 
         total_cov = exp_cov + cov_exp
 
@@ -453,7 +500,8 @@ class DriftModel(eqx.Module):
         mu_k: Float[jax.Array, "n_components 2"],
         sigma_k: Float[jax.Array, "n_components 2"],
         rho_k: Float[jax.Array, "n_components"],
-        key: Key[jax.Array, ""]
+        key: Key[jax.Array, ""],
+        delta_t: Float[jax.Array, ""]
     ) -> tuple[Float[jax.Array, ""], Float[jax.Array, ""]]:
         key, subkey = jrd.split(key)
         component = jrd.choice(subkey, a=pi_k.shape[0], p=pi_k)
@@ -466,11 +514,11 @@ class DriftModel(eqx.Module):
         z_x = jrd.normal(subkey_x)
         z_y = jrd.normal(subkey_y)
 
-        u = mu_x + sigma_x / jnp.sqrt(self.delta_t) * z_x  # in m/s
+        u = mu_x + sigma_x / jnp.sqrt(delta_t) * z_x  # in m/s
         v = (
             mu_y + 
-            rho * sigma_y / jnp.sqrt(self.delta_t) * z_x + 
-            jnp.sqrt(1 - rho ** 2) * sigma_y / jnp.sqrt(self.delta_t) * z_y
+            rho * sigma_y / jnp.sqrt(delta_t) * z_x + 
+            jnp.sqrt(1 - rho ** 2) * sigma_y / jnp.sqrt(delta_t) * z_y
         )  # in m/s
 
         return u, v
