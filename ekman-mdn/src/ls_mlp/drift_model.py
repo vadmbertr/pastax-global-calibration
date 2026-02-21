@@ -23,15 +23,15 @@ class DriftModel(eqx.Module):
 
     def estimate_velocity(
         self,
-        month_of_year: Float[jax.Array, ""],
-        lat: Float[jax.Array, ""],
-        lon: Float[jax.Array, ""],
         ugos: Float[jax.Array, ""],
         vgos: Float[jax.Array, ""],
         eastward_stress: Float[jax.Array, ""],
         northward_stress: Float[jax.Array, ""],
         eastward_wind: Float[jax.Array, ""],
-        northward_wind: Float[jax.Array, ""]
+        northward_wind: Float[jax.Array, ""],
+        month_of_year: Float[jax.Array, ""],
+        lat: Float[jax.Array, ""],
+        lon: Float[jax.Array, ""]
     ) -> Complex[jax.Array, ""]:
         features = self._get_features(month_of_year, lat, lon)
         

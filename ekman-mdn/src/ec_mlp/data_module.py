@@ -6,7 +6,7 @@ import numpy as np
 import xarray as xr
 from torch.utils.data import DataLoader
 
-from src.commons.dataset import split_dataset, XarrayDataset
+from src.commons.dataset import IncrementDataset, split_dataset
 
 
 class DataModule(L.LightningDataModule):
@@ -104,7 +104,7 @@ class DataModule(L.LightningDataModule):
         self.wind_normalization = np.sqrt(train_ds.eastward_wind.var() + train_ds.northward_wind.var()).values.item()
             
         def to_dataset(ds):
-            return XarrayDataset(
+            return IncrementDataset(
                 ds, var_names=self.var_names, transforms=self.transforms, normalize_stats=self.normalize_stats,
             )
 

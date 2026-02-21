@@ -154,7 +154,8 @@ class DriftModel(eqx.Module):
             ugos, vgos, eastward_stress, northward_stress, eastward_wind, northward_wind, *physical_parameters
         )
 
-        mode_epsilon_u, mode_epsilon_v = self.get_mode_residual_velocity_from_mdn_parameters(*mdn_parameters)
+        pi_k, mu_k, _, _ = mdn_parameters
+        mode_epsilon_u, mode_epsilon_v = self.get_mode_residual_velocity_from_mdn_parameters(pi_k, mu_k)
 
         u_mode = u_est + mode_epsilon_u
         v_mode = v_est + mode_epsilon_v
